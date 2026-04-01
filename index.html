@@ -162,8 +162,8 @@
 <body>
 
     <div id="loading-overlay">
-        <div style="font-size: 1.8rem; color: var(--primary); margin-bottom: 10px;">☁️ Hệ thống Đám mây</div>
-        <div style="font-weight: normal; color: #666;">Đang đồng bộ hóa dữ liệu thực tế...</div>
+        <div id="loading-title" style="font-size: 1.8rem; color: var(--primary); margin-bottom: 10px;">☁️ Hệ thống Đám mây</div>
+        <div id="loading-status" style="font-weight: normal; color: #666;">Đang đồng bộ hóa dữ liệu thực tế...</div>
     </div>
 
     <aside class="sidebar">
@@ -250,7 +250,26 @@
             return `${day}/${month}/${year}`;
         }
 
+        // Đóng màn hình chờ
+        function hideLoading() {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.style.display = 'none';
+            const btn = document.getElementById('syncBtn');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = auth.currentUser ? 'Đã đồng bộ Cloud' : 'Chế độ ngoại tuyến';
+            }
+        }
+
         async function initApp() {
+            // Hẹn giờ 5 giây nếu không kết nối được sẽ tự đóng loading
+            const fallbackTimeout = setTimeout(() => {
+                if (isInitialLoad) {
+                    console.warn("Firebase connection timeout - switching to offline mode.");
+                    hideLoading();
+                }
+            }, 5000);
+
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await auth.signInWithCustomToken(__initial_auth_token);
@@ -261,6 +280,7 @@
                 // Lắng nghe dữ liệu Đám mây
                 db.collection('artifacts').doc(appId).collection('public').doc('data').collection('configs').doc('main')
                 .onSnapshot(doc => {
+                    clearTimeout(fallbackTimeout);
                     if (doc.exists) {
                         const data = doc.data();
                         dayConfigs = data.configs || {};
@@ -271,23 +291,32 @@
                             document.getElementById('maxY').value = data.yMax || 3500;
                             isInitialLoad = false;
                         }
+                    } else {
+                        isInitialLoad = false;
                     }
                     renderSidebarUI();
                     refreshChart();
                     renderLogUI();
-                    document.getElementById('loading-overlay').style.display = 'none';
-                    const syncBtn = document.getElementById('syncBtn');
-                    syncBtn.disabled = false;
-                    syncBtn.innerText = 'Đã đồng bộ Cloud';
+                    hideLoading();
                 }, (err) => {
                     console.error("Firestore Listen Error:", err);
+                    clearTimeout(fallbackTimeout);
+                    hideLoading();
+                    renderSidebarUI();
+                    refreshChart();
                 });
             } catch (error) {
                 console.error("Auth Error:", error);
+                clearTimeout(fallbackTimeout);
+                hideLoading();
+                renderSidebarUI();
+                refreshChart();
             }
         }
 
         async function pushSync(actionDescription) {
+            if (!auth.currentUser) return; // Không lưu nếu không có kết nối
+
             if (actionDescription) {
                 editHistory.unshift({ time: new Date().toLocaleTimeString('vi-VN'), msg: actionDescription });
             }
