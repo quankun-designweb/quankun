@@ -3,12 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hệ thống Thống kê Client - v4.5 Final</title>
+    <title>Hệ thống Thống kê Client - v5.0 Offline</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Firebase SDK Compat -->
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -100,7 +96,6 @@
 
         .btn-blue { background: var(--primary); color: white; }
         .btn-blue:hover { background: #1d4ed8; }
-        .btn-blue:disabled { background: #94a3b8; cursor: not-allowed; }
         .btn-outline { background: white; border: 1px solid var(--border); color: var(--text-main); }
         .btn-outline:hover { background: #f1f5f9; }
 
@@ -155,16 +150,9 @@
         .log-entry { padding: 0.6rem; background: white; border: 1px solid var(--border); cursor: pointer; border-radius: 6px; }
         .log-entry:hover { border-color: var(--primary); background: var(--primary-light); }
         .log-time { color: var(--primary); font-weight: bold; margin-bottom: 2px; display: block; }
-
-        #loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.95); z-index: 999; display: flex; flex-direction: column; justify-content: center; align-items: center; font-weight: bold; }
     </style>
 </head>
 <body>
-
-    <div id="loading-overlay">
-        <div id="loading-title" style="font-size: 1.8rem; color: var(--primary); margin-bottom: 10px;">☁️ Hệ thống Đám mây</div>
-        <div id="loading-status" style="font-weight: normal; color: #666;">Đang đồng bộ hóa dữ liệu thực tế...</div>
-    </div>
 
     <aside class="sidebar">
         <div class="sidebar-header">
@@ -184,7 +172,7 @@
                 <input type="number" id="maxY" value="3500" step="100">
             </div>
             <div class="btn-stack">
-                <button id="syncBtn" class="btn btn-blue" onclick="manualSync()" disabled>Kết nối...</button>
+                <button id="updateBtn" class="btn btn-blue" onclick="manualUpdate()">Cập nhật dữ liệu</button>
                 <button class="btn btn-outline" onclick="exportPNG()" title="Lưu hình ảnh biểu đồ">📷 Lưu</button>
             </div>
         </div>
@@ -221,19 +209,9 @@
     </main>
 
     <script>
-        // --- FIREBASE CONFIGURATION ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-            apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: ""
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-        const auth = firebase.auth();
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'v4-final-stats';
-
         let mainChartInstance = null;
         let dayConfigs = {};
         let editHistory = [];
-        let isInitialLoad = true;
 
         // Nhịp độ khách hàng theo giờ (0h-23h)
         const hourlyCurve = [
@@ -250,89 +228,45 @@
             return `${day}/${month}/${year}`;
         }
 
-        // Đóng màn hình chờ
-        function hideLoading() {
-            const overlay = document.getElementById('loading-overlay');
-            if (overlay) overlay.style.display = 'none';
-            const btn = document.getElementById('syncBtn');
-            if (btn) {
-                btn.disabled = false;
-                btn.innerText = auth.currentUser ? 'Đã đồng bộ Cloud' : 'Chế độ ngoại tuyến';
+        // Lưu dữ liệu vào LocalStorage
+        function saveData() {
+            const dataToSave = {
+                configs: dayConfigs,
+                logs: editHistory,
+                start: document.getElementById('startDate').value,
+                end: document.getElementById('endDate').value,
+                yMax: document.getElementById('maxY').value
+            };
+            localStorage.setItem('client_stats_data', JSON.stringify(dataToSave));
+        }
+
+        // Tải dữ liệu từ LocalStorage
+        function loadData() {
+            const savedData = localStorage.getItem('client_stats_data');
+            if (savedData) {
+                const data = JSON.parse(savedData);
+                dayConfigs = data.configs || {};
+                editHistory = data.logs || [];
+                document.getElementById('startDate').value = data.start || "2025-09-14";
+                document.getElementById('endDate').value = data.end || "2025-10-13";
+                document.getElementById('maxY').value = data.yMax || 3500;
             }
         }
 
-        async function initApp() {
-            // Hẹn giờ 5 giây nếu không kết nối được sẽ tự đóng loading
-            const fallbackTimeout = setTimeout(() => {
-                if (isInitialLoad) {
-                    console.warn("Firebase connection timeout - switching to offline mode.");
-                    hideLoading();
-                }
-            }, 5000);
-
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await auth.signInWithCustomToken(__initial_auth_token);
-                } else {
-                    await auth.signInAnonymously();
-                }
-
-                // Lắng nghe dữ liệu Đám mây
-                db.collection('artifacts').doc(appId).collection('public').doc('data').collection('configs').doc('main')
-                .onSnapshot(doc => {
-                    clearTimeout(fallbackTimeout);
-                    if (doc.exists) {
-                        const data = doc.data();
-                        dayConfigs = data.configs || {};
-                        editHistory = data.logs || [];
-                        if (isInitialLoad) {
-                            document.getElementById('startDate').value = data.start || "2025-09-14";
-                            document.getElementById('endDate').value = data.end || "2025-10-13";
-                            document.getElementById('maxY').value = data.yMax || 3500;
-                            isInitialLoad = false;
-                        }
-                    } else {
-                        isInitialLoad = false;
-                    }
-                    renderSidebarUI();
-                    refreshChart();
-                    renderLogUI();
-                    hideLoading();
-                }, (err) => {
-                    console.error("Firestore Listen Error:", err);
-                    clearTimeout(fallbackTimeout);
-                    hideLoading();
-                    renderSidebarUI();
-                    refreshChart();
-                });
-            } catch (error) {
-                console.error("Auth Error:", error);
-                clearTimeout(fallbackTimeout);
-                hideLoading();
-                renderSidebarUI();
-                refreshChart();
-            }
+        function initApp() {
+            loadData();
+            renderSidebarUI();
+            refreshChart();
+            renderLogUI();
         }
 
-        async function pushSync(actionDescription) {
-            if (!auth.currentUser) return; // Không lưu nếu không có kết nối
-
+        function addLog(actionDescription) {
             if (actionDescription) {
                 editHistory.unshift({ time: new Date().toLocaleTimeString('vi-VN'), msg: actionDescription });
             }
             if (editHistory.length > 25) editHistory.pop();
-
-            try {
-                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('configs').doc('main').set({
-                    configs: dayConfigs,
-                    logs: editHistory,
-                    start: document.getElementById('startDate').value,
-                    end: document.getElementById('endDate').value,
-                    yMax: document.getElementById('maxY').value
-                });
-            } catch (e) {
-                console.error("Sync Error:", e);
-            }
+            renderLogUI();
+            saveData();
         }
 
         function renderSidebarUI() {
@@ -376,7 +310,7 @@
         function updateDayValue(key, val) {
             dayConfigs[key].val = parseInt(val) || 0;
             refreshChart();
-            pushSync(); 
+            saveData();
         }
 
         function toggleDayStatus(key) {
@@ -384,15 +318,16 @@
             const globalMax = parseInt(document.getElementById('maxY').value);
             dayConfigs[key].val = dayConfigs[key].on ? (globalMax - 400) : 450;
             
-            // Chuyển đổi key gạch ngang sang định dạng dd/mm/yyyy để hiển thị log đẹp hơn
             const dateObj = new Date(key);
-            pushSync(`Đổi trạng thái ngày ${formatFullDate(dateObj)}`);
+            addLog(`Đổi trạng thái ngày ${formatFullDate(dateObj)}`);
+            renderSidebarUI();
+            refreshChart();
         }
 
         function renderLogUI() {
             const container = document.getElementById('logContent');
             if (editHistory.length === 0) {
-                container.innerHTML = '<div style="text-align:center; color:#999; margin-top:20px;">Chưa có lịch sử Cloud</div>';
+                container.innerHTML = '<div style="text-align:center; color:#999; margin-top:20px;">Chưa có lịch sử chỉnh sửa</div>';
                 return;
             }
             container.innerHTML = editHistory.map((log) => `
@@ -432,7 +367,6 @@
                 const conf = dayConfigs[key] || { val: 400 };
 
                 for (let h = 0; h < 24; h++) {
-                    // Logic chỉ hiện nhãn ở điểm đầu và điểm cuối tuyệt đối dùng định dạng dd/mm/yyyy
                     if (i === 0 && h === 0) {
                         labels.push(formatFullDate(date));
                     } else if (i === totalDays - 1 && h === 23) {
@@ -475,7 +409,7 @@
                             grid: { display: false }, 
                             ticks: { 
                                 font: { weight: 'bold', size: 14 },
-                                maxRotation: 0, // Giữ nhãn nằm ngang
+                                maxRotation: 0, 
                                 minRotation: 0
                             } 
                         },
@@ -494,7 +428,10 @@
             });
         }
 
-        function manualSync() { pushSync("Cập nhật thủ công"); }
+        function manualUpdate() { 
+            addLog("Cập nhật thông số toàn cục");
+            refreshChart();
+        }
         
         function exportPNG() {
             const canvas = document.getElementById('mainChart');
@@ -505,17 +442,31 @@
         }
 
         function clearHistory() {
-            if(confirm("Bạn có chắc chắn muốn xóa sạch lịch sử Cloud?")) {
+            if(confirm("Bạn có chắc chắn muốn xóa sạch lịch sử chỉnh sửa?")) {
                 editHistory = [];
-                pushSync();
+                renderLogUI();
+                saveData();
             }
         }
         
         window.onload = initApp;
 
-        document.getElementById('startDate').onchange = () => { dayConfigs = {}; renderSidebarUI(); pushSync(); };
-        document.getElementById('endDate').onchange = () => { dayConfigs = {}; renderSidebarUI(); pushSync(); };
-        document.getElementById('maxY').onchange = () => { refreshChart(); pushSync(); };
+        document.getElementById('startDate').onchange = () => { 
+            dayConfigs = {}; 
+            renderSidebarUI(); 
+            addLog("Thay đổi ngày bắt đầu");
+            refreshChart(); 
+        };
+        document.getElementById('endDate').onchange = () => { 
+            dayConfigs = {}; 
+            renderSidebarUI(); 
+            addLog("Thay đổi ngày kết thúc");
+            refreshChart(); 
+        };
+        document.getElementById('maxY').onchange = () => { 
+            refreshChart(); 
+            saveData();
+        };
     </script>
 </body>
 </html>
