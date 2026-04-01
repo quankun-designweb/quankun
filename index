@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ thống Thống kê Client - v4.5 Final</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Firebase SDK Compat -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #dbeafe;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            /* Thiết lập font size 13pt (~17.3px) theo yêu cầu */
+            --font-size-global: 13pt; 
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            color: var(--text-main);
+            font-size: var(--font-size-global);
+        }
+
+        /* Sidebar Layout */
+        .sidebar {
+            width: 480px;
+            background: var(--card);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 10px 0 15px rgba(0,0,0,0.02);
+            z-index: 100;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .sidebar-footer {
+            height: 220px;
+            border-top: 2px solid var(--border);
+            background: #f8fafc;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* UI Components */
+        h2 { font-size: 1.4rem; margin: 0 0 1rem 0; font-weight: 700; }
+        .control-group { margin-bottom: 1.25rem; }
+        label { display: block; font-size: 0.85rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem; letter-spacing: 0.025em; }
+        
+        input[type="date"], input[type="number"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            outline: none;
+            transition: border 0.2s;
+        }
+
+        input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-light); }
+
+        .btn-stack { display: grid; grid-template-columns: 2fr 1fr; gap: 0.5rem; }
+        
+        .btn {
+            padding: 0.85rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: 0.2s;
+        }
+
+        .btn-blue { background: var(--primary); color: white; }
+        .btn-blue:hover { background: #1d4ed8; }
+        .btn-blue:disabled { background: #94a3b8; cursor: not-allowed; }
+        .btn-outline { background: white; border: 1px solid var(--border); color: var(--text-main); }
+        .btn-outline:hover { background: #f1f5f9; }
+
+        /* Day Selection List */
+        .day-list { display: flex; flex-direction: column; gap: 0.6rem; }
+        .day-item {
+            display: grid;
+            grid-template-columns: 140px 1fr 50px;
+            align-items: center;
+            padding: 0.85rem;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+        }
+        .day-item.is-off { opacity: 0.5; background: #f1f5f9; border-style: dashed; }
+        .day-info { font-size: 0.95rem; line-height: 1.4; }
+        .day-info b { font-size: 1rem; color: var(--primary); }
+        .day-val input { margin: 0; padding: 6px 8px; text-align: center; border-radius: 4px; border: 1px solid #cbd5e1; width: 95%; font-weight: 700; font-size: 1rem; }
+
+        /* Main View */
+        .main {
+            flex: 1;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chart-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05);
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 1.5rem; }
+
+        /* Custom Switch */
+        .switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .3s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--primary); }
+        input:checked + .slider:before { transform: translateX(16px); }
+
+        /* Log List */
+        .log-header { padding: 0.75rem 1.25rem; background: #e2e8f0; font-size: 0.8rem; font-weight: 800; display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); }
+        .log-content { flex: 1; overflow-y: auto; padding: 0.75rem; font-size: 0.8rem; display: flex; flex-direction: column; gap: 4px; }
+        .log-entry { padding: 0.6rem; background: white; border: 1px solid var(--border); cursor: pointer; border-radius: 6px; }
+        .log-entry:hover { border-color: var(--primary); background: var(--primary-light); }
+        .log-time { color: var(--primary); font-weight: bold; margin-bottom: 2px; display: block; }
+
+        #loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.95); z-index: 999; display: flex; flex-direction: column; justify-content: center; align-items: center; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <div style="font-size: 1.8rem; color: var(--primary); margin-bottom: 10px;">☁️ Hệ thống Đám mây</div>
+        <div style="font-weight: normal; color: #666;">Đang đồng bộ hóa dữ liệu thực tế...</div>
+    </div>
+
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h2>Thiết lập Hệ thống</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;" class="control-group">
+                <div>
+                    <label>Ngày bắt đầu</label>
+                    <input type="date" id="startDate" value="2025-09-14">
+                </div>
+                <div>
+                    <label>Ngày kết thúc</label>
+                    <input type="date" id="endDate" value="2025-10-13">
+                </div>
+            </div>
+            <div class="control-group">
+                <label>Trần tối đa Trục Y</label>
+                <input type="number" id="maxY" value="3500" step="100">
+            </div>
+            <div class="btn-stack">
+                <button id="syncBtn" class="btn btn-blue" onclick="manualSync()" disabled>Kết nối...</button>
+                <button class="btn btn-outline" onclick="exportPNG()" title="Lưu hình ảnh biểu đồ">📷 Lưu</button>
+            </div>
+        </div>
+
+        <div class="sidebar-scroll">
+            <label>Cấu hình ngày (DD/MM/YYYY)</label>
+            <div id="dayList" class="day-list"></div>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="log-header">
+                LỊCH SỬ CHỈNH SỬA
+                <span onclick="clearHistory()" style="color:#ef4444; cursor:pointer;">XÓA</span>
+            </div>
+            <div id="logContent" class="log-content"></div>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="chart-container">
+            <div class="chart-header">
+                <div>
+                    <h2 id="mainTitle" style="margin:0;">Thống kê Client Chi tiết</h2>
+                    <p id="subTitle" style="margin:5px 0 0 0; color:var(--text-muted); font-size:1.1rem;"></p>
+                </div>
+                <div style="text-align: right; font-size: 1rem; color: #94a3b8;">
+                    Định dạng: <b>DD/MM/YYYY</b> | Bước nhảy: 500
+                </div>
+            </div>
+            <div style="flex: 1; position: relative; min-height: 0;">
+                <canvas id="mainChart"></canvas>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- FIREBASE CONFIGURATION ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: ""
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'v4-final-stats';
+
+        let mainChartInstance = null;
+        let dayConfigs = {};
+        let editHistory = [];
+        let isInitialLoad = true;
+
+        // Nhịp độ khách hàng theo giờ (0h-23h)
+        const hourlyCurve = [
+            0.05, 0.04, 0.03, 0.03, 0.04, 0.08, 0.25, 0.55, 
+            0.95, 0.88, 1.0, 0.85, 0.40, 0.65, 0.98, 0.82, 
+            0.90, 0.70, 0.50, 0.35, 0.25, 0.18, 0.12, 0.08
+        ];
+
+        // Định dạng ngày hiển thị dd/mm/yyyy
+        function formatFullDate(date) {
+            const day = date.getDate().toString().padStart(2, '0');
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        }
+
+        async function initApp() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await auth.signInWithCustomToken(__initial_auth_token);
+                } else {
+                    await auth.signInAnonymously();
+                }
+
+                // Lắng nghe dữ liệu Đám mây
+                db.collection('artifacts').doc(appId).collection('public').doc('data').collection('configs').doc('main')
+                .onSnapshot(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        dayConfigs = data.configs || {};
+                        editHistory = data.logs || [];
+                        if (isInitialLoad) {
+                            document.getElementById('startDate').value = data.start || "2025-09-14";
+                            document.getElementById('endDate').value = data.end || "2025-10-13";
+                            document.getElementById('maxY').value = data.yMax || 3500;
+                            isInitialLoad = false;
+                        }
+                    }
+                    renderSidebarUI();
+                    refreshChart();
+                    renderLogUI();
+                    document.getElementById('loading-overlay').style.display = 'none';
+                    const syncBtn = document.getElementById('syncBtn');
+                    syncBtn.disabled = false;
+                    syncBtn.innerText = 'Đã đồng bộ Cloud';
+                }, (err) => {
+                    console.error("Firestore Listen Error:", err);
+                });
+            } catch (error) {
+                console.error("Auth Error:", error);
+            }
+        }
+
+        async function pushSync(actionDescription) {
+            if (actionDescription) {
+                editHistory.unshift({ time: new Date().toLocaleTimeString('vi-VN'), msg: actionDescription });
+            }
+            if (editHistory.length > 25) editHistory.pop();
+
+            try {
+                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('configs').doc('main').set({
+                    configs: dayConfigs,
+                    logs: editHistory,
+                    start: document.getElementById('startDate').value,
+                    end: document.getElementById('endDate').value,
+                    yMax: document.getElementById('maxY').value
+                });
+            } catch (e) {
+                console.error("Sync Error:", e);
+            }
+        }
+
+        function renderSidebarUI() {
+            const startInput = document.getElementById('startDate').value;
+            const endInput = document.getElementById('endDate').value;
+            if (!startInput || !endInput) return;
+
+            const start = new Date(startInput);
+            const end = new Date(endInput);
+            const container = document.getElementById('dayList');
+            container.innerHTML = '';
+
+            let current = new Date(start);
+            while (current <= end) {
+                const key = current.toISOString().split('T')[0];
+                const dayLabel = current.toLocaleDateString('vi-VN', { weekday: 'short' });
+                const dateDisplay = formatFullDate(current);
+
+                if (!dayConfigs[key]) {
+                    const isWeekend = (current.getDay() === 0 || current.getDay() === 6);
+                    dayConfigs[key] = { on: !isWeekend, val: !isWeekend ? 3000 : 450 };
+                }
+
+                const row = document.createElement('div');
+                row.className = `day-item ${!dayConfigs[key].on ? 'is-off' : ''}`;
+                row.innerHTML = `
+                    <div class="day-info"><b>${dayLabel}</b><br>${dateDisplay}</div>
+                    <div class="day-val"><input type="number" value="${dayConfigs[key].val}" onchange="updateDayValue('${key}', this.value)"></div>
+                    <div style="text-align:right">
+                        <label class="switch">
+                            <input type="checkbox" ${dayConfigs[key].on ? 'checked' : ''} onchange="toggleDayStatus('${key}')">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                `;
+                container.appendChild(row);
+                current.setDate(current.getDate() + 1);
+            }
+        }
+
+        function updateDayValue(key, val) {
+            dayConfigs[key].val = parseInt(val) || 0;
+            refreshChart();
+            pushSync(); 
+        }
+
+        function toggleDayStatus(key) {
+            dayConfigs[key].on = !dayConfigs[key].on;
+            const globalMax = parseInt(document.getElementById('maxY').value);
+            dayConfigs[key].val = dayConfigs[key].on ? (globalMax - 400) : 450;
+            
+            // Chuyển đổi key gạch ngang sang định dạng dd/mm/yyyy để hiển thị log đẹp hơn
+            const dateObj = new Date(key);
+            pushSync(`Đổi trạng thái ngày ${formatFullDate(dateObj)}`);
+        }
+
+        function renderLogUI() {
+            const container = document.getElementById('logContent');
+            if (editHistory.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#999; margin-top:20px;">Chưa có lịch sử Cloud</div>';
+                return;
+            }
+            container.innerHTML = editHistory.map((log) => `
+                <div class="log-entry">
+                    <span class="log-time">[${log.time}]</span> ${log.msg || 'Cập nhật thông số dữ liệu'}
+                </div>
+            `).join('');
+        }
+
+        function refreshChart() {
+            const startStr = document.getElementById('startDate').value;
+            const endStr = document.getElementById('endDate').value;
+            if (!startStr || !endStr) return;
+
+            const start = new Date(startStr);
+            const end = new Date(endStr);
+            const yMax = parseInt(document.getElementById('maxY').value);
+            const labels = [];
+            
+            const datasets = [
+                { l: 'Hust_B1', c: 'rgba(30, 58, 138, 0.7)' },
+                { l: 'Hust_B1_Staff', c: 'rgba(59, 130, 246, 0.6)' },
+                { l: 'Hust_C7_Giangduong', c: 'rgba(96, 165, 250, 0.5)' },
+                { l: 'Hust_D5_Giangduong', c: 'rgba(147, 197, 253, 0.4)' },
+                { l: 'Hust_TV.TQB', c: 'rgba(219, 234, 254, 0.3)' }
+            ].map(d => ({ 
+                label: d.l, data: [], backgroundColor: d.c, 
+                borderColor: d.c.replace(/0\.\d/, '1'), 
+                fill: true, tension: 0, pointRadius: 0, borderWidth: 0.5 
+            }));
+
+            let totalDays = Math.ceil((end - start) / 86400000) + 1;
+            for (let i = 0; i < totalDays; i++) {
+                const date = new Date(start); 
+                date.setDate(start.getDate() + i);
+                const key = date.toISOString().split('T')[0];
+                const conf = dayConfigs[key] || { val: 400 };
+
+                for (let h = 0; h < 24; h++) {
+                    // Logic chỉ hiện nhãn ở điểm đầu và điểm cuối tuyệt đối dùng định dạng dd/mm/yyyy
+                    if (i === 0 && h === 0) {
+                        labels.push(formatFullDate(date));
+                    } else if (i === totalDays - 1 && h === 23) {
+                        labels.push(formatFullDate(date));
+                    } else {
+                        labels.push("");
+                    }
+
+                    datasets.forEach((ds, idx) => {
+                        const shares = [0.35, 0.25, 0.20, 0.12, 0.08];
+                        const jitter = (Math.random() * 20 - 10);
+                        ds.data.push(Math.floor((conf.val * shares[idx] + jitter) * hourlyCurve[h]));
+                    });
+                }
+            }
+
+            document.getElementById('mainTitle').innerText = `Thống kê Client Chi tiết (${formatFullDate(start)} - ${formatFullDate(end)})`;
+            document.getElementById('subTitle').innerText = `Max Trục Y: ${yMax} | Quy mô: ${totalDays} ngày`;
+
+            if (mainChartInstance) mainChartInstance.destroy();
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            mainChartInstance = new Chart(ctx, {
+                type: 'line', 
+                data: { labels, datasets },
+                options: {
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { 
+                            position: 'top', 
+                            labels: { 
+                                usePointStyle: true, 
+                                boxWidth: 10, 
+                                font: { size: 16 }
+                            } 
+                        } 
+                    },
+                    scales: {
+                        x: { 
+                            grid: { display: false }, 
+                            ticks: { 
+                                font: { weight: 'bold', size: 14 },
+                                maxRotation: 0, // Giữ nhãn nằm ngang
+                                minRotation: 0
+                            } 
+                        },
+                        y: { 
+                            stacked: true, 
+                            beginAtZero: true, 
+                            max: yMax, 
+                            ticks: { 
+                                stepSize: 500,
+                                font: { size: 14 } 
+                            } 
+                        }
+                    },
+                    interaction: { mode: 'index', intersect: false }
+                }
+            });
+        }
+
+        function manualSync() { pushSync("Cập nhật thủ công"); }
+        
+        function exportPNG() {
+            const canvas = document.getElementById('mainChart');
+            const link = document.createElement('a');
+            link.download = `client-report-${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function clearHistory() {
+            if(confirm("Bạn có chắc chắn muốn xóa sạch lịch sử Cloud?")) {
+                editHistory = [];
+                pushSync();
+            }
+        }
+        
+        window.onload = initApp;
+
+        document.getElementById('startDate').onchange = () => { dayConfigs = {}; renderSidebarUI(); pushSync(); };
+        document.getElementById('endDate').onchange = () => { dayConfigs = {}; renderSidebarUI(); pushSync(); };
+        document.getElementById('maxY').onchange = () => { refreshChart(); pushSync(); };
+    </script>
+</body>
+</html>
